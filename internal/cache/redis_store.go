@@ -17,6 +17,7 @@ const (
 	responsePrefix = "resp:"
 	lockPrefix     = "lock:"
 	donePrefix     = "done:"
+	doneKeyPrefix  = "done-key:"
 )
 
 var ErrWaitTimeout = errors.New("wait timeout")
@@ -147,6 +148,9 @@ return 0
 }
 
 func (s *RedisStore) PublishDone(ctx context.Context, key string) error {
+	if err := s.client.Set(ctx, doneKeyPrefix+key, "1", 5*time.Second).Err(); err != nil {
+		return fmt.Errorf("set done key: %w", err)
+	}
 	if err := s.client.Publish(ctx, donePrefix+key, "done").Err(); err != nil {
 		return fmt.Errorf("publish done notification: %w", err)
 	}
@@ -158,11 +162,29 @@ func (s *RedisStore) WaitForDone(ctx context.Context, key string, timeout time.D
 		timeout = 15 * time.Second
 	}
 
+	doneKey := doneKeyPrefix + key
+	exists, err := s.client.Exists(ctx, doneKey).Result()
+	if err != nil {
+		return fmt.Errorf("check done key: %w", err)
+	}
+	if exists > 0 {
+		return nil
+	}
+
 	pubsub := s.client.Subscribe(ctx, donePrefix+key)
 	defer pubsub.Close()
 
 	if _, err := pubsub.Receive(ctx); err != nil {
 		return fmt.Errorf("subscribe done notification: %w", err)
+	}
+
+	// Double-check after subscription to avoid missing a publish between exists-check and subscribe.
+	exists, err = s.client.Exists(ctx, doneKey).Result()
+	if err != nil {
+		return fmt.Errorf("recheck done key: %w", err)
+	}
+	if exists > 0 {
+		return nil
 	}
 
 	timer := time.NewTimer(timeout)

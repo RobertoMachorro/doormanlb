@@ -36,6 +36,7 @@ type CachingService struct {
 const (
 	defaultLeaderLockTTL = 15 * time.Second
 	maxLeaderLockTTL     = 30 * time.Second
+	maxCacheAttempts     = 3
 )
 
 type serviceMetrics struct {
@@ -84,7 +85,7 @@ func (s *CachingService) handleCache(ctx context.Context, request *http.Request,
 	ttl := endpoint.CacheTTL()
 	lockTTL := leaderLockTTL(ttl)
 
-	for attempts := 0; attempts < 2; attempts++ {
+	for attempts := 0; attempts < maxCacheAttempts; attempts++ {
 		cachedResponse, err := s.cache.Get(ctx, cacheKey)
 		if err != nil {
 			s.stats.cacheOperationError.Add(1)
@@ -116,6 +117,9 @@ func (s *CachingService) handleCache(ctx context.Context, request *http.Request,
 		}
 		if errors.Is(err, cache.ErrWaitTimeout) {
 			s.stats.followerTimeouts.Add(1)
+			if sleepErr := sleepBackoff(ctx, attempts); sleepErr != nil {
+				return sleepErr
+			}
 		}
 	}
 
@@ -210,4 +214,16 @@ func leaderLockTTL(cacheTTL time.Duration) time.Duration {
 
 func shouldCache(statusCode int) bool {
 	return statusCode < http.StatusInternalServerError
+}
+
+func sleepBackoff(ctx context.Context, attempt int) error {
+	backoff := time.Duration(attempt+1) * 10 * time.Millisecond
+	timer := time.NewTimer(backoff)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

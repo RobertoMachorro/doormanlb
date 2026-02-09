@@ -288,8 +288,8 @@ func TestHandleCacheMissFollowerTimeoutFallsBackToFetch(t *testing.T) {
 		t.Fatalf("expected fallback body, got %q", recorder.Body.String())
 	}
 	metrics := svc.Metrics()
-	if metrics["follower_timeouts_total"] != 2 {
-		t.Fatalf("expected follower_timeouts_total=2, got %d", metrics["follower_timeouts_total"])
+	if metrics["follower_timeouts_total"] != 3 {
+		t.Fatalf("expected follower_timeouts_total=3, got %d", metrics["follower_timeouts_total"])
 	}
 	if metrics["fallback_fetches_total"] != 1 {
 		t.Fatalf("expected fallback_fetches_total=1, got %d", metrics["fallback_fetches_total"])
@@ -432,5 +432,14 @@ func TestLeaderLockTTLBounds(t *testing.T) {
 				t.Fatalf("leaderLockTTL(%s)=%s, want %s", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSleepBackoffHonorsContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := sleepBackoff(ctx, 1); err == nil {
+		t.Fatal("expected context cancellation error")
 	}
 }

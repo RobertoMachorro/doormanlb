@@ -20,6 +20,11 @@ REDIS_URL="redis://127.0.0.1:6379"
 
 `REDIS_URL` is required when any endpoint uses `cacheBehavior: "CACHE"`.
 
+## Test Execution
+
+- Unit tests: `go test ./...`
+- Integration tests (requires a running Redis instance): `REDIS_URL_TEST=redis://127.0.0.1:6379 go test ./internal/cache -run RedisStore`
+
 ## Operational Endpoints
 
 - `GET /__doormanlb/health` returns `200 OK` when the process is running.

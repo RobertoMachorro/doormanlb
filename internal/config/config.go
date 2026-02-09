@@ -17,6 +17,7 @@ const (
 	CacheBehaviorPassthrough = "PASSTHROUGH"
 
 	DefaultEndpointKey = "DEFAULT"
+	AdminPathPrefix    = "/__doormanlb/"
 )
 
 type Config struct {
@@ -89,6 +90,9 @@ func (c Config) Validate() error {
 		}
 		if endpoint == "" {
 			return errors.New("endpoint keys cannot be empty")
+		}
+		if strings.HasPrefix(endpoint, AdminPathPrefix) {
+			return fmt.Errorf("endpoint key %q uses reserved prefix %q", endpoint, AdminPathPrefix)
 		}
 		if err := validateEndpoint(endpointCfg, false); err != nil {
 			return fmt.Errorf("invalid endpoints.%s: %w", endpoint, err)

@@ -163,6 +163,48 @@ func TestHandleCacheMissFetchesAndStores(t *testing.T) {
 	}
 }
 
+func TestHandleCacheMissDoesNotStore5xx(t *testing.T) {
+	cfg := config.Config{
+		Services: []string{"http://svc-a"},
+		Strategy: config.StrategyRoundRobin,
+		Endpoints: map[string]config.EndpointConfig{
+			config.DefaultEndpointKey: {
+				CacheBehavior: config.CacheBehaviorCache,
+				ExpireTimeout: 5000,
+			},
+		},
+	}
+
+	router, err := routing.NewRouter(cfg.Services, cfg.Strategy)
+	if err != nil {
+		t.Fatalf("creating router: %v", err)
+	}
+
+	store := &fakeStore{}
+	fetcher := &fakeFetcher{
+		response: &proxy.Response{
+			StatusCode: http.StatusInternalServerError,
+			Body:       []byte("error"),
+		},
+	}
+
+	svc := NewCachingService(cfg, router, store, fetcher)
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/articles?a=1", nil)
+	recorder := httptest.NewRecorder()
+
+	if err := svc.Handle(context.Background(), req, recorder); err != nil {
+		t.Fatalf("handling request: %v", err)
+	}
+
+	if store.setCalled != 0 {
+		t.Fatalf("expected no cache set for 5xx, got %d", store.setCalled)
+	}
+	metrics := svc.Metrics()
+	if metrics["cache_skips_5xx_total"] != 1 {
+		t.Fatalf("expected cache_skips_5xx_total=1, got %d", metrics["cache_skips_5xx_total"])
+	}
+}
+
 func TestHandleCacheMissFollowerWaitsAndUsesCache(t *testing.T) {
 	cfg := config.Config{
 		Services: []string{"http://svc-a"},
@@ -247,6 +289,29 @@ func TestHandleCacheMissFollowerTimeoutFallsBackToFetch(t *testing.T) {
 	}
 }
 
+func TestReadyFailsWhenCacheConfiguredButMissingStore(t *testing.T) {
+	cfg := config.Config{
+		Services: []string{"http://svc-a"},
+		Strategy: config.StrategyRoundRobin,
+		Endpoints: map[string]config.EndpointConfig{
+			config.DefaultEndpointKey: {
+				CacheBehavior: config.CacheBehaviorCache,
+				ExpireTimeout: 5000,
+			},
+		},
+	}
+
+	router, err := routing.NewRouter(cfg.Services, cfg.Strategy)
+	if err != nil {
+		t.Fatalf("creating router: %v", err)
+	}
+
+	svc := NewCachingService(cfg, router, nil, &fakeFetcher{})
+	if err := svc.Ready(context.Background()); err == nil {
+		t.Fatal("expected readiness error when cache is configured without store")
+	}
+}
+
 type fakeStore struct {
 	getCalled     int
 	acquireCalled int
@@ -320,6 +385,10 @@ func (f *fakeStore) WaitForDone(_ context.Context, _ string, _ time.Duration) er
 	if f.waitErr != nil {
 		return f.waitErr
 	}
+	return nil
+}
+
+func (f *fakeStore) Ping(_ context.Context) error {
 	return nil
 }
 

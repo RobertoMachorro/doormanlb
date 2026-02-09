@@ -185,3 +185,10 @@ func randomToken() (string, error) {
 	}
 	return hex.EncodeToString(bytes), nil
 }
+
+func (s *RedisStore) Ping(ctx context.Context) error {
+	if err := s.client.Ping(ctx).Err(); err != nil {
+		return fmt.Errorf("ping redis: %w", err)
+	}
+	return nil
+}

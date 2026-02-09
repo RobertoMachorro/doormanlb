@@ -67,6 +67,26 @@ func TestUsesCache(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsReservedAdminPrefix(t *testing.T) {
+	cfg := Config{
+		Services: []string{"http://svc-a:8080"},
+		Strategy: StrategyRoundRobin,
+		Endpoints: map[string]EndpointConfig{
+			DefaultEndpointKey: {
+				CacheBehavior: CacheBehaviorPassthrough,
+			},
+			AdminPathPrefix + "metrics": {
+				CacheBehavior: CacheBehaviorPassthrough,
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected reserved admin prefix validation error")
+	}
+}
+
 func boolPtr(value bool) *bool {
 	return &value
 }

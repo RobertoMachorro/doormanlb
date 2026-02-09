@@ -35,6 +35,7 @@ type CachingService struct {
 
 const (
 	defaultLeaderLockTTL = 15 * time.Second
+	maxLeaderLockTTL     = 30 * time.Second
 )
 
 type serviceMetrics struct {
@@ -47,6 +48,8 @@ type serviceMetrics struct {
 	cacheSets           atomic.Uint64
 	cacheSkips5xx       atomic.Uint64
 	cacheOperationError atomic.Uint64
+	followerTimeouts    atomic.Uint64
+	fallbackFetches     atomic.Uint64
 }
 
 func NewCachingService(config config.Config, router *routing.Router, cacheStore cache.Store, proxyClient responseFetcher) *CachingService {
@@ -111,9 +114,13 @@ func (s *CachingService) handleCache(ctx context.Context, request *http.Request,
 			s.stats.cacheOperationError.Add(1)
 			return err
 		}
+		if errors.Is(err, cache.ErrWaitTimeout) {
+			s.stats.followerTimeouts.Add(1)
+		}
 	}
 
 	// Fallback to direct upstream response if lock/wait retries were inconclusive.
+	s.stats.fallbackFetches.Add(1)
 	return s.fetchAndWrite(ctx, request, writer)
 }
 
@@ -174,23 +181,31 @@ func (s *CachingService) Ready(ctx context.Context) error {
 
 func (s *CachingService) Metrics() map[string]uint64 {
 	return map[string]uint64{
-		"requests_total":         s.stats.requestsTotal.Load(),
-		"cache_hits_total":       s.stats.cacheHits.Load(),
-		"cache_misses_total":     s.stats.cacheMisses.Load(),
-		"leader_acquired_total":  s.stats.leaderAcquired.Load(),
-		"follower_waits_total":   s.stats.followerWaits.Load(),
-		"upstream_fetches_total": s.stats.upstreamFetches.Load(),
-		"cache_sets_total":       s.stats.cacheSets.Load(),
-		"cache_skips_5xx_total":  s.stats.cacheSkips5xx.Load(),
-		"cache_errors_total":     s.stats.cacheOperationError.Load(),
+		"requests_total":          s.stats.requestsTotal.Load(),
+		"cache_hits_total":        s.stats.cacheHits.Load(),
+		"cache_misses_total":      s.stats.cacheMisses.Load(),
+		"leader_acquired_total":   s.stats.leaderAcquired.Load(),
+		"follower_waits_total":    s.stats.followerWaits.Load(),
+		"upstream_fetches_total":  s.stats.upstreamFetches.Load(),
+		"cache_sets_total":        s.stats.cacheSets.Load(),
+		"cache_skips_5xx_total":   s.stats.cacheSkips5xx.Load(),
+		"cache_errors_total":      s.stats.cacheOperationError.Load(),
+		"follower_timeouts_total": s.stats.followerTimeouts.Load(),
+		"fallback_fetches_total":  s.stats.fallbackFetches.Load(),
 	}
 }
 
 func leaderLockTTL(cacheTTL time.Duration) time.Duration {
-	if cacheTTL > defaultLeaderLockTTL {
-		return cacheTTL
+	if cacheTTL <= 0 {
+		return defaultLeaderLockTTL
 	}
-	return defaultLeaderLockTTL
+	if cacheTTL < defaultLeaderLockTTL {
+		return defaultLeaderLockTTL
+	}
+	if cacheTTL > maxLeaderLockTTL {
+		return maxLeaderLockTTL
+	}
+	return cacheTTL
 }
 
 func shouldCache(statusCode int) bool {

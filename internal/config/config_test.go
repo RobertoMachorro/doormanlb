@@ -87,6 +87,46 @@ func TestValidateRejectsReservedAdminPrefix(t *testing.T) {
 	}
 }
 
+func TestValidateRequiresPositiveTTLWhenCachingDefault(t *testing.T) {
+	cfg := Config{
+		Services: []string{"http://svc-a:8080"},
+		Strategy: StrategyRoundRobin,
+		Endpoints: map[string]EndpointConfig{
+			DefaultEndpointKey: {
+				CacheBehavior: CacheBehaviorCache,
+				ExpireTimeout: 0,
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for CACHE default with zero expireTimeout")
+	}
+}
+
+func TestValidateRequiresPositiveResolvedTTLForOverride(t *testing.T) {
+	cfg := Config{
+		Services: []string{"http://svc-a:8080"},
+		Strategy: StrategyRoundRobin,
+		Endpoints: map[string]EndpointConfig{
+			DefaultEndpointKey: {
+				CacheBehavior: CacheBehaviorPassthrough,
+				ExpireTimeout: 0,
+			},
+			"/cached": {
+				CacheBehavior: CacheBehaviorCache,
+				ExpireTimeout: 0,
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for CACHE endpoint with zero resolved expireTimeout")
+	}
+}
+
 func boolPtr(value bool) *bool {
 	return &value
 }

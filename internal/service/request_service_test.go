@@ -287,6 +287,13 @@ func TestHandleCacheMissFollowerTimeoutFallsBackToFetch(t *testing.T) {
 	if recorder.Body.String() != "fallback" {
 		t.Fatalf("expected fallback body, got %q", recorder.Body.String())
 	}
+	metrics := svc.Metrics()
+	if metrics["follower_timeouts_total"] != 2 {
+		t.Fatalf("expected follower_timeouts_total=2, got %d", metrics["follower_timeouts_total"])
+	}
+	if metrics["fallback_fetches_total"] != 1 {
+		t.Fatalf("expected fallback_fetches_total=1, got %d", metrics["fallback_fetches_total"])
+	}
 }
 
 func TestReadyFailsWhenCacheConfiguredButMissingStore(t *testing.T) {
@@ -404,4 +411,26 @@ func (f *fakeFetcher) Fetch(_ context.Context, _ string, _ *http.Request) (*prox
 		f.response = &proxy.Response{StatusCode: http.StatusOK}
 	}
 	return f.response, f.err
+}
+
+func TestLeaderLockTTLBounds(t *testing.T) {
+	tests := []struct {
+		name  string
+		input time.Duration
+		want  time.Duration
+	}{
+		{name: "zero uses default", input: 0, want: defaultLeaderLockTTL},
+		{name: "below default uses default", input: 2 * time.Second, want: defaultLeaderLockTTL},
+		{name: "within range uses input", input: 20 * time.Second, want: 20 * time.Second},
+		{name: "above max clamps", input: 90 * time.Second, want: maxLeaderLockTTL},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := leaderLockTTL(tt.input)
+			if got != tt.want {
+				t.Fatalf("leaderLockTTL(%s)=%s, want %s", tt.input, got, tt.want)
+			}
+		})
+	}
 }

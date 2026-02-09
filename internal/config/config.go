@@ -99,6 +99,10 @@ func (c Config) Validate() error {
 		}
 	}
 
+	if err := c.validateResolvedCacheExpirations(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -165,4 +169,23 @@ func (e EndpointConfig) ShouldIgnoreParameters() bool {
 
 func (e EndpointConfig) CacheTTL() time.Duration {
 	return time.Duration(e.ExpireTimeout) * time.Millisecond
+}
+
+func (c Config) validateResolvedCacheExpirations() error {
+	defaultCfg := c.Endpoint(DefaultEndpointKey)
+	if defaultCfg.CacheBehavior == CacheBehaviorCache && defaultCfg.ExpireTimeout <= 0 {
+		return fmt.Errorf("endpoints.%s.expireTimeout must be > 0 when cacheBehavior is %q", DefaultEndpointKey, CacheBehaviorCache)
+	}
+
+	for endpoint := range c.Endpoints {
+		if endpoint == DefaultEndpointKey {
+			continue
+		}
+		resolved := c.Endpoint(endpoint)
+		if resolved.CacheBehavior == CacheBehaviorCache && resolved.ExpireTimeout <= 0 {
+			return fmt.Errorf("endpoints.%s resolves to CACHE but has no positive expireTimeout", endpoint)
+		}
+	}
+
+	return nil
 }
